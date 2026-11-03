@@ -1,44 +1,72 @@
+```bash
 #!/bin/bash
 # db.sh - Database Instance Bootstrap for Amazon Linux 2023
 # AMI: ami-08e7e754b2c895da7 | Instance: t3.nano
 
+set -Eeuo pipefail
+
 exec > >(tee -a /var/log/db-init.log) 2>&1
+
 echo "=== db.sh started at $(date -u +%FT%TZ) ==="
 
-# 0. Add Swap (t3.nano = 512MB RAM; PostgreSQL benefits from swap)
+# 0. Add Swap
 if [ ! -f /swapfile ]; then
+  echo "--- Configuring swap ---"
   fallocate -l 1G /swapfile
   chmod 600 /swapfile
   mkswap /swapfile
   swapon /swapfile
-  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  grep -q '^/swapfile ' /etc/fstab || \
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
-# 1. Update the instance
+# 1. Update instance
 echo "--- Updating system ---"
 dnf update -y
 
-# 2. Install PostgreSQL
-echo "--- Installing PostgreSQL ---"
-dnf install -y postgresql-server postgresql-contrib
+# 2. Install PostgreSQL 15 Server and Client
+echo "--- Installing PostgreSQL 15 ---"
+dnf install -y postgresql15-server postgresql15
 
-# 3. Initialize and enable PostgreSQL
-echo "--- Initializing PostgreSQL ---"
-postgresql-setup --initdb
-systemctl enable postgresql
-systemctl start postgresql
+# 3. Initialize PostgreSQL
+echo "--- Initializing PostgreSQL 15 ---"
 
-# 4. Configure to listen on all interfaces (SG restricts actual access)
+if [ ! -f /var/lib/pgsql/data/PG_VERSION ]; then
+  /usr/bin/postgresql-setup --initdb --unit postgresql-15
+else
+  echo "PostgreSQL data directory already initialized."
+fi
+
+# 4. Configure PostgreSQL
 PG_CONF="/var/lib/pgsql/data/postgresql.conf"
-sed -i "s/^#listen_addresses.*/listen_addresses = '*'/" "$PG_CONF"
+PG_HBA="/var/lib/pgsql/data/pg_hba.conf"
 
-# Allow connections from VPC CIDR (adjust if your VPC CIDR differs)
-echo "host    all             all             10.0.0.0/16             scram-sha-256" >> /var/lib/pgsql/data/pg_hba.conf
-systemctl restart postgresql
+echo "--- Configuring PostgreSQL ---"
 
-# 5. Verification
-echo "--- Versions ---"
+# Listen on all interfaces
+if grep -qE '^[#[:space:]]*listen_addresses' "$PG_CONF"; then
+  sed -i "s/^[#[:space:]]*listen_addresses.*/listen_addresses = '*'/" "$PG_CONF"
+else
+  echo "listen_addresses = '*'" >> "$PG_CONF"
+fi
+
+# Allow connections from the VPC CIDR
+grep -qE '^host[[:space:]]+all[[:space:]]+all[[:space:]]+10\.0\.0\.0/16' "$PG_HBA" || \
+  echo "host all all 10.0.0.0/16 scram-sha-256" >> "$PG_HBA"
+
+# 5. Enable and start PostgreSQL
+echo "--- Starting PostgreSQL 15 ---"
+systemctl enable --now postgresql-15
+
+# 6. Verify installation and service
+echo "--- Verifying PostgreSQL ---"
+
 psql --version
-systemctl is-active postgresql
+systemctl is-active --quiet postgresql-15
+
+sudo -u postgres psql -c "SELECT version();"
+
+ss -lntp | grep ':5432'
 
 echo "=== db.sh finished at $(date -u +%FT%TZ) ==="
+```

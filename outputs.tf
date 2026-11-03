@@ -12,7 +12,10 @@ output "database_private_ip" {
   description = "Database private IP"
   value       = module.database.private_ip
 }
-
+output "database_public_ip" {
+  description = "Public IP of the database instance"
+  value       = module.database.public_ip
+}
 output "load_generator_public_ip" {
   description = "Load generator public IP"
   value       = module.load_generator.public_ip

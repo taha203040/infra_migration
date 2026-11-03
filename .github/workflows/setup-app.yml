@@ -84,4 +84,4 @@ jobs:
               exit 1
             fi
 
-            echo "Application started successfully."
+            echo "✅Application started successfully✅."

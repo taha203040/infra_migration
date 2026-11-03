@@ -1,39 +1,105 @@
-
+```bash
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
+# Configuration
 REPO="taha203040/infra_migration"
+TF_DIR="${TF_DIR:-.}"
 
-# Check GitHub CLI authentication
+echo "=== Terraform to GitHub Secrets ==="
+
+# Check required tools
+command -v terraform >/dev/null || {
+    echo "Error: Terraform is not installed."
+    exit 1
+}
+
+command -v gh >/dev/null || {
+    echo "Error: GitHub CLI is not installed."
+    exit 1
+}
+
+# Check GitHub authentication
 gh auth status
 
-echo "Configuring GitHub Actions secrets..."
+# Enter Terraform directory
+cd "$TF_DIR"
 
-# Infrastructure IPs
-gh secret set APP_EC2_HOST -R "$REPO" --body "13.61.196.232"
-gh secret set DB_EC2_HOST -R "$REPO" --body "51.21.255.104"
-gh secret set DB_PRV_IP -R "$REPO" --body "10.0.1.69"
-gh secret set EC_APP_PRV -R "$REPO" --body "10.0.1.115"
-gh secret set K6_EC2_HOST -R "$REPO" --body "13.50.4.91"
+# Check Terraform initialization
+if [ ! -d ".terraform" ]; then
+    echo "Error: Terraform is not initialized. Run terraform init first."
+    exit 1
+fi
 
-# EC2 configuration
-gh secret set EC2_USER -R "$REPO" --body "ec2-user"
+# Check Terraform outputs
+terraform output >/dev/null
+
+# Read Terraform output and store it as a GitHub secret
+set_secret_from_output() {
+    local SECRET_NAME="$1"
+    local OUTPUT_NAME="$2"
+    local VALUE
+
+    echo "Reading Terraform output: $OUTPUT_NAME"
+
+    VALUE=$(terraform output -raw "$OUTPUT_NAME")
+
+    if [ -z "$VALUE" ]; then
+        echo "Error: Output $OUTPUT_NAME is empty."
+        exit 1
+    fi
+
+    printf '%s' "$VALUE" | gh secret set "$SECRET_NAME" -R "$REPO"
+
+    echo "Updated secret: $SECRET_NAME"
+}
+
+echo "--- Configuring infrastructure secrets ---"
+
+# Application EC2
+set_secret_from_output APP_EC2_HOST app_public_ip
+set_secret_from_output EC_APP_PRV app_private_ip
+
+# Database EC2
+set_secret_from_output DB_EC2_HOST database_public_ip
+set_secret_from_output DB_PRV_IP database_private_ip
+
+# K6 / Load Generator EC2
+set_secret_from_output K6_EC2_HOST load_generator_public_ip
+
+echo "--- Configuring EC2 username ---"
+
+printf '%s' "ec2-user" | gh secret set EC2_USER -R "$REPO"
 
 # Database password
+echo "--- Configuring database password ---"
+
 read -rsp "Enter database password: " DB_PASSWORD
 echo
-gh secret set DB_PASSWORD -R "$REPO" --body "$DB_PASSWORD"
+
+if [ -z "$DB_PASSWORD" ]; then
+    echo "Error: Database password cannot be empty."
+    exit 1
+fi
+
+printf '%s' "$DB_PASSWORD" | gh secret set DB_PASSWORD -R "$REPO"
 unset DB_PASSWORD
 
 # SSH private key
-read -rp "../migration_key.pem.pem file: " SSH_KEY_PATH
+echo "--- Configuring SSH private key ---"
 
-if [[ ! -f "$SSH_KEY_PATH" ]]; then
+read -rp "Enter path to your EC2 .pem file: " SSH_KEY_PATH
+
+if [ ! -f "$SSH_KEY_PATH" ]; then
     echo "Error: SSH key file not found."
     exit 1
 fi
 
 gh secret set EC2_SSH_KEY -R "$REPO" < "$SSH_KEY_PATH"
 
-echo "Successfully configured all repository secrets!"
+echo ""
+echo "======================================"
+echo "✅Successfully configured GitHub Secrets✅"
+echo "======================================"
+```

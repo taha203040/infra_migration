@@ -84,4 +84,4 @@ jobs:
               -d migration_lab \
               -c "\dt"
 
-            echo "Database setup completed."
+            echo "✅Database setup completed.✅"
