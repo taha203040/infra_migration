@@ -1,4 +1,4 @@
-name: Setup k6 EC2
+name: Setup Traffic Generator
 
 on:
   workflow_dispatch:
@@ -8,24 +8,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Setup k6
+      - name: Create traffic test file
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.K6_EC2_HOST }}
-          username: ec2-user
+          username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          script_stop: true          # <-- fail on first error, cleaner than relying on set -e
           script: |
             set -euo pipefail
 
-            echo "=== Checking k6 ==="
+            # Verify K6 is already installed
+            command -v k6 >/dev/null 2>&1 || {
+              echo "K6 is not installed."
+              exit 1
+            }
+
             k6 version
 
-            echo "=== Creating traffic test ==="
-            mkdir -p ~/migration-load-test
-            cd ~/migration-load-test
+            # Create traffic test directory
+            mkdir -p "$HOME/migration-load-test"
 
-            cat > traffic.ts <<'EOF'
+            cd "$HOME/migration-load-test"
+
+            # Create traffic test script
+            cat > traffic.ts <<EOF
             import http from 'k6/http';
             import { check, sleep } from 'k6';
 
@@ -35,7 +41,7 @@ jobs:
             };
 
             export default function () {
-              const response = http.get('http://172.31.48.98:3000');
+              const response = http.get('http://${{ secrets.EC_APP_PRV }}:3000');
 
               check(response, {
                 'status is 200': (r) => r.status === 200,
@@ -45,7 +51,4 @@ jobs:
             }
             EOF
 
-            echo "=== Traffic test created ==="
-
-            # Run the test manually later:
-            # cd ~/migration-load-test && k6 run traffic.ts
+            echo "Traffic test file created successfully."

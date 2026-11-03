@@ -1,4 +1,4 @@
-name: Setup App EC2
+name: Setup App
 
 on:
   workflow_dispatch:
@@ -8,88 +8,61 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to App EC2
+      - name: Setup application on EC2
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.APP_EC2_HOST }}
-          username: ec2-user
+          username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          script_stop: true          # <-- fail on first error (don't rely on `set -e` only)
           script: |
             set -euo pipefail
 
-            # ---------------------------------------------------------------
-            # 1. Update the instance
-            # ---------------------------------------------------------------
-            echo "=== Updating EC2 ==="
-            sudo dnf update -y
+            APP_DIR="$HOME/migration"
 
-            # ---------------------------------------------------------------
-            # 2. Install Node.js 22 + git
-            #    AL2023 package name is "nodejs22" (repos: nodejs20, nodejs22)
-            # ---------------------------------------------------------------
-            echo "=== Installing packages ==="
-            sudo dnf install -y git nodejs22
-
-            # AL2023 installs Node 22 as /usr/bin/node-22 / npm-22 ; make them default
-            if ! command -v node >/dev/null 2>&1; then
-              sudo alternatives --install /usr/bin/node node /usr/bin/node-22 90 || true
-              sudo alternatives --install /usr/bin/npm  npm  /usr/bin/npm-22  90 || true
+            # Clone or update the repository
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone https://github.com/taha203040/migration.git "$APP_DIR"
+            else
+              git -C "$APP_DIR" pull --ff-only
             fi
-            node --version
-            npm  --version
-            git  --version
-            # ---------------------------------------------------------------
-            # 4. Clone application
-            # ---------------------------------------------------------------
-            echo "=== Cloning application ==="
-            git clone https://github.com/taha203040/migration.git ~/migration
-            cd ~/migration
 
-            # ---------------------------------------------------------------
-            # 5. Write .env  (note the heredoc must NOT be indented — see notes)
-            # ---------------------------------------------------------------
-            echo "=== Creating environment ==="
+            cd "$APP_DIR"
+
+            # Create environment configuration
             umask 077
+
             cat > .env <<EOF
             PORT=3000
             DATABASE_URL=postgresql://postgres:${{ secrets.DB_PASSWORD }}@${{ secrets.DB_PRV_IP }}:5432/migration_lab
             EOF
 
-            # ---------------------------------------------------------------
-            # 6. Install dependencies + build
-            # ---------------------------------------------------------------
-            echo "=== Installing dependencies ==="
-            npm ci
-
-            echo "=== Install missing types ==="
-            npm install --save-dev @types/pg
-
-            echo "=== Building application ==="
+            # Build the application
             npm run build
 
-            # ---------------------------------------------------------------
-            # 7. Restart application
-            # ---------------------------------------------------------------
-            echo "=== Stopping old application ==="
-            if [ -f ~/migration.pid ]; then
-              OLD_PID=$(cat ~/migration.pid)
-              kill "$OLD_PID" 2>/dev/null || true
-              sleep 2
-              kill -9 "$OLD_PID" 2>/dev/null || true
+            # Stop previous application process
+            if [ -f "$HOME/migration.pid" ]; then
+              OLD_PID=$(cat "$HOME/migration.pid")
+
+              if kill -0 "$OLD_PID" 2>/dev/null; then
+                kill "$OLD_PID"
+                sleep 2
+
+                if kill -0 "$OLD_PID" 2>/dev/null; then
+                  kill -9 "$OLD_PID"
+                fi
+              fi
             fi
 
-            echo "=== Starting application ==="
-            nohup npm start > ~/migration.log 2>&1 &
-            echo $! > ~/migration.pid
+            # Start application
+            nohup npm start > "$HOME/migration.log" 2>&1 &
+            echo $! > "$HOME/migration.pid"
 
-            echo "=== Checking application startup ==="
             sleep 5
 
-            if ! kill -0 "$(cat ~/migration.pid)" 2>/dev/null; then
-              echo "ERROR: Application process exited."
-              cat ~/migration.log
+            # Verify process
+            if ! kill -0 "$(cat "$HOME/migration.pid")" 2>/dev/null; then
+              cat "$HOME/migration.log"
               exit 1
             fi
 
-            echo "=== App deployment complete ==="
+            echo "Application started successfully."
