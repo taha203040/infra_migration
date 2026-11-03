@@ -8,36 +8,63 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Create database and schema
+      - name: Configure PostgreSQL and create schema
         uses: appleboy/ssh-action@v1.2.2
+
         env:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_PRV_IP: ${{ secrets.DB_PRV_IP }}
+
         with:
           host: ${{ secrets.DB_EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           envs: DB_PASSWORD,DB_PRV_IP
+
           script: |
             set -euo pipefail
 
-            # Install PostgreSQL client
-            if ! command -v psql >/dev/null 2>&1; then
-              sudo dnf install -y postgresql15
+            # 1. Validate environment
+            if [[ -z "$DB_PASSWORD" || -z "$DB_PRV_IP" ]]; then
+              echo "ERROR: Missing database configuration."
+              exit 1
             fi
 
-            psql --version
+            # 2. Verify PostgreSQL service
+            sudo systemctl is-active --quiet postgresql || {
+              echo "ERROR: PostgreSQL is not running."
+              exit 1
+            }
 
+            # 3. Configure or rotate postgres password
+            echo "Configuring PostgreSQL password..."
+
+            sudo -u postgres psql \
+              -v ON_ERROR_STOP=1 \
+              -v password="$DB_PASSWORD" \
+              -c "ALTER ROLE postgres WITH PASSWORD :'password';"
+
+            echo "PostgreSQL password configured."
+
+            # 4. Configure password authentication
             export PGPASSWORD="$DB_PASSWORD"
 
-            # Create database if it does not exist
+            # 5. Verify TCP connection
+            psql \
+              -h "$DB_PRV_IP" \
+              -U postgres \
+              -d postgres \
+              -v ON_ERROR_STOP=1 \
+              -c "SELECT version();"
+
+            # 6. Create database if it does not exist
             DB_EXISTS=$(psql \
               -h "$DB_PRV_IP" \
               -U postgres \
               -d postgres \
               -tAc "SELECT 1 FROM pg_database WHERE datname = 'migration_lab'")
 
-            if [ "$DB_EXISTS" != "1" ]; then
+            if [[ "$DB_EXISTS" != "1" ]]; then
               psql \
                 -h "$DB_PRV_IP" \
                 -U postgres \
@@ -50,7 +77,7 @@ jobs:
               echo "Database already exists."
             fi
 
-            # Create schema
+            # 7. Create schema
             psql \
               -h "$DB_PRV_IP" \
               -U postgres \
@@ -77,11 +104,16 @@ jobs:
 
             SQL
 
-            # Verify tables
+            # 8. Verify tables
+            echo "--- Verifying tables ---"
+
             psql \
               -h "$DB_PRV_IP" \
               -U postgres \
               -d migration_lab \
+              -v ON_ERROR_STOP=1 \
               -c "\dt"
 
-            echo "✅Database setup completed.✅"
+            unset PGPASSWORD
+
+            echo "Database setup completed successfully."
