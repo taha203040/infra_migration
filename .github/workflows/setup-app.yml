@@ -41,7 +41,20 @@ jobs:
             PORT=3000
             DATABASE_URL=postgresql://postgres:${{ secrets.DB_PASSWORD }}@${{ secrets.DB_PRV_IP }}:5432/migration_lab
             EOF
+            # Install project dependencies
+            npm ci
 
+            # Install missing TypeScript dependencies
+            npm install --save-dev \
+              typescript \
+              tsx \
+              @types/node \
+              @types/express \
+              @types/pg
+
+            # Verify TypeScript tools
+            npx tsc --version
+            npx tsx --version
             # Build the application
             npm run build
 
