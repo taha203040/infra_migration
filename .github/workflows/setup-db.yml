@@ -21,6 +21,13 @@ jobs:
           script: |
             set -euo pipefail
 
+            # Install PostgreSQL client
+            if ! command -v psql >/dev/null 2>&1; then
+              sudo dnf install -y postgresql15
+            fi
+
+            psql --version
+
             export PGPASSWORD="$DB_PASSWORD"
 
             # Create database if it does not exist
@@ -38,12 +45,12 @@ jobs:
                 -v ON_ERROR_STOP=1 \
                 -c "CREATE DATABASE migration_lab"
 
-              echo "Database migration_lab created."
+              echo "Database created."
             else
-              echo "Database migration_lab already exists."
+              echo "Database already exists."
             fi
 
-            # Create tables and index
+            # Create schema
             psql \
               -h "$DB_PRV_IP" \
               -U postgres \
@@ -70,11 +77,11 @@ jobs:
 
             SQL
 
-            echo "Database schema created successfully."
-
-            # Verify database and tables
+            # Verify tables
             psql \
               -h "$DB_PRV_IP" \
               -U postgres \
               -d migration_lab \
               -c "\dt"
+
+            echo "Database setup completed."
