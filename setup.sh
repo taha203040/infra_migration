@@ -1,4 +1,3 @@
-```bash
 #!/bin/bash
 
 set -euo pipefail
@@ -102,4 +101,3 @@ echo ""
 echo "======================================"
 echo "✅Successfully configured GitHub Secrets✅"
 echo "======================================"
-```

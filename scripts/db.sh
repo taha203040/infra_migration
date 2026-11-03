@@ -1,4 +1,3 @@
-```bash
 #!/bin/bash
 # db.sh - Database Instance Bootstrap for Amazon Linux 2023
 # AMI: ami-08e7e754b2c895da7 | Instance: t3.nano
@@ -69,4 +68,3 @@ sudo -u postgres psql -c "SELECT version();"
 ss -lntp | grep ':5432'
 
 echo "=== db.sh finished at $(date -u +%FT%TZ) ==="
-```
