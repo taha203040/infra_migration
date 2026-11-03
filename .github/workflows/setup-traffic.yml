@@ -1,0 +1,51 @@
+name: Setup k6 EC2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-k6:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup k6
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.K6_EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true          # <-- fail on first error, cleaner than relying on set -e
+          script: |
+            set -euo pipefail
+
+            echo "=== Checking k6 ==="
+            k6 version
+
+            echo "=== Creating traffic test ==="
+            mkdir -p ~/migration-load-test
+            cd ~/migration-load-test
+
+            cat > traffic.ts <<'EOF'
+            import http from 'k6/http';
+            import { check, sleep } from 'k6';
+
+            export const options = {
+              vus: 5,
+              duration: '30s',
+            };
+
+            export default function () {
+              const response = http.get('http://172.31.48.98:3000');
+
+              check(response, {
+                'status is 200': (r) => r.status === 200,
+              });
+
+              sleep(1);
+            }
+            EOF
+
+            echo "=== Traffic test created ==="
+
+            # Run the test manually later:
+            # cd ~/migration-load-test && k6 run traffic.ts

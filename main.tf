@@ -174,3 +174,28 @@ module "load_generator" {
   role               = "load-generator"
   user_data          = file("${path.module}/scripts/k6.sh")
 }
+
+# module "new_app" {
+#   source = "./modules/ec2"
+#
+#   name               = "${var.project_name}-new-app"
+#   ami_id             = var.ami_id
+#   instance_type      = var.instance_type
+#   subnet_id          = aws_subnet.public.id
+#   security_group_ids = [aws_security_group.app.id]
+#   key_name           = var.key_name
+#   role               = "new-app"
+#   user_data          = file("${path.module}/scripts/app.sh")
+# }
+# module "backfill" {
+#   source = "./modules/ec2"
+#
+#   name               = "${var.project_name}-new-app"
+#   ami_id             = var.ami_id
+#   instance_type      = var.instance_type
+#   subnet_id          = aws_subnet.public.id
+#   security_group_ids = [aws_security_group.app.id]
+#   key_name           = var.key_name
+#   role               = "backfill"
+#   user_data          = file("${path.module}/scripts/app.sh")
+# }

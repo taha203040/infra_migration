@@ -1,0 +1,116 @@
+name: Setup Database EC2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-db:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ---------------------------------------------------------------------
+      # Step 1: install PostgreSQL, init cluster, set password, create DB,
+      #         open network access to app EC2
+      # ---------------------------------------------------------------------
+      - name: Setup PostgreSQL
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.DB_EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            echo "=== Updating EC2 ==="
+            sudo dnf update -y
+
+            echo "=== Installing PostgreSQL 15 ==="
+            sudo dnf install -y postgresql15 postgresql15-server
+
+            echo "=== Initializing PostgreSQL ==="
+            if [ ! -f /var/lib/pgsql/data/PG_VERSION ]; then
+              sudo postgresql-setup --initdb
+            fi
+
+            echo "=== Starting PostgreSQL ==="
+            sudo systemctl enable postgresql
+            sudo systemctl start postgresql
+
+            echo "=== Setting PostgreSQL password ==="
+            sudo -u postgres psql <<EOF
+            ALTER USER postgres WITH PASSWORD '${{ secrets.DB_PASSWORD }}';
+            EOF
+
+            echo "=== Creating database ==="
+            sudo -u postgres psql -tAc \
+              "SELECT 1 FROM pg_database WHERE datname = 'migration_lab'" \
+              | grep -q 1 || \
+              sudo -u postgres createdb migration_lab
+
+            echo "=== Configuring PostgreSQL network access ==="
+            sudo sed -i \
+              "s/^#\?listen_addresses.*/listen_addresses = '*'/" \
+              /var/lib/pgsql/data/postgresql.conf
+
+            echo "=== Allowing App EC2 ==="
+            APP_IP="${APP_PRIVATE_IP:?APP_PRIVATE_IP is not set}"
+
+            if ! sudo grep -q "${APP_IP}/32" /var/lib/pgsql/data/pg_hba.conf; then
+              echo "host    migration_lab    postgres    ${APP_IP}/32    scram-sha-256" \
+                | sudo tee -a /var/lib/pgsql/data/pg_hba.conf
+            fi
+
+            echo "=== Restarting PostgreSQL ==="
+            sudo systemctl restart postgresql
+
+            echo "=== PostgreSQL status ==="
+            sudo systemctl status postgresql --no-pager
+
+            echo "=== Database setup complete ==="
+        env:
+          APP_PRIVATE_IP: ${{ vars.APP_PRIVATE_IP }}   # repo Settings → Variables
+
+      # ---------------------------------------------------------------------
+      # Step 2: create tables (schema)
+      # ---------------------------------------------------------------------
+      - name: Initialize PostgreSQL database
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.DB_EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            echo "=== Ensure database exists ==="
+            sudo -u postgres psql -tAc \
+              "SELECT 1 FROM pg_database WHERE datname = 'migration_lab'" \
+              | grep -q 1 || \
+              sudo -u postgres createdb migration_lab
+
+            echo "=== Create application tables ==="
+            sudo -u postgres psql -v ON_ERROR_STOP=1 -d migration_lab <<'SQL'
+            CREATE TABLE IF NOT EXISTS users (
+                id BIGSERIAL PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS posts (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id),
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_posts_user_id
+                ON posts(user_id);
+            SQL
+
+            echo "=== Verify tables ==="
+            sudo -u postgres psql -d migration_lab -c '\dt'
+            echo "=== Database initialization complete ==="

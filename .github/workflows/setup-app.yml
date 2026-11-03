@@ -1,0 +1,95 @@
+name: Setup App EC2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-app:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to App EC2
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.APP_EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true          # <-- fail on first error (don't rely on `set -e` only)
+          script: |
+            set -euo pipefail
+
+            # ---------------------------------------------------------------
+            # 1. Update the instance
+            # ---------------------------------------------------------------
+            echo "=== Updating EC2 ==="
+            sudo dnf update -y
+
+            # ---------------------------------------------------------------
+            # 2. Install Node.js 22 + git
+            #    AL2023 package name is "nodejs22" (repos: nodejs20, nodejs22)
+            # ---------------------------------------------------------------
+            echo "=== Installing packages ==="
+            sudo dnf install -y git nodejs22
+
+            # AL2023 installs Node 22 as /usr/bin/node-22 / npm-22 ; make them default
+            if ! command -v node >/dev/null 2>&1; then
+              sudo alternatives --install /usr/bin/node node /usr/bin/node-22 90 || true
+              sudo alternatives --install /usr/bin/npm  npm  /usr/bin/npm-22  90 || true
+            fi
+            node --version
+            npm  --version
+            git  --version
+            # ---------------------------------------------------------------
+            # 4. Clone application
+            # ---------------------------------------------------------------
+            echo "=== Cloning application ==="
+            git clone https://github.com/taha203040/migration.git ~/migration
+            cd ~/migration
+
+            # ---------------------------------------------------------------
+            # 5. Write .env  (note the heredoc must NOT be indented — see notes)
+            # ---------------------------------------------------------------
+            echo "=== Creating environment ==="
+            umask 077
+            cat > .env <<EOF
+            PORT=3000
+            DATABASE_URL=postgresql://postgres:${{ secrets.DB_PASSWORD }}@${{ secrets.DB_PRV_IP }}:5432/migration_lab
+            EOF
+
+            # ---------------------------------------------------------------
+            # 6. Install dependencies + build
+            # ---------------------------------------------------------------
+            echo "=== Installing dependencies ==="
+            npm ci
+
+            echo "=== Install missing types ==="
+            npm install --save-dev @types/pg
+
+            echo "=== Building application ==="
+            npm run build
+
+            # ---------------------------------------------------------------
+            # 7. Restart application
+            # ---------------------------------------------------------------
+            echo "=== Stopping old application ==="
+            if [ -f ~/migration.pid ]; then
+              OLD_PID=$(cat ~/migration.pid)
+              kill "$OLD_PID" 2>/dev/null || true
+              sleep 2
+              kill -9 "$OLD_PID" 2>/dev/null || true
+            fi
+
+            echo "=== Starting application ==="
+            nohup npm start > ~/migration.log 2>&1 &
+            echo $! > ~/migration.pid
+
+            echo "=== Checking application startup ==="
+            sleep 5
+
+            if ! kill -0 "$(cat ~/migration.pid)" 2>/dev/null; then
+              echo "ERROR: Application process exited."
+              cat ~/migration.log
+              exit 1
+            fi
+
+            echo "=== App deployment complete ==="
