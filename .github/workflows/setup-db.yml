@@ -39,10 +39,19 @@ jobs:
             # 3. Configure or rotate postgres password
             echo "Configuring PostgreSQL password..."
 
+            echo "Configuring PostgreSQL password..."
+
+            cd /tmp
+
             sudo -u postgres psql \
               -v ON_ERROR_STOP=1 \
-              -v password="$DB_PASSWORD" \
-              -c "ALTER ROLE postgres WITH PASSWORD :'password';"
+              --set=password="$DB_PASSWORD" <<'SQL'
+
+            ALTER ROLE postgres WITH PASSWORD :'password';
+
+            SQL
+
+            echo "PostgreSQL password configured."
 
             echo "PostgreSQL password configured."
 
