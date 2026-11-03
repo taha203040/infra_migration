@@ -1,0 +1,7 @@
+aws_region    = "eu-north-1"
+instance_type = "t3.micro"
+project_name  = "migration-lab"
+
+# Put your existing EC2 key pair name here.
+
+key_name = "YOUR_KEY_PAIR_NAME"
