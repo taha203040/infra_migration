@@ -27,12 +27,13 @@ jobs:
             fi
 
             cd "$APP_DIR"
-            # Install tsx globally
-            if ! command -v tsx >/dev/null 2>&1; then
-              sudo npm install -g tsx
-            fi
+            # Install global TypeScript and tsx
+            sudo npm install -g typescript tsx
 
+            # Verify installations
+            tsc --version
             tsx --version
+
             # Create environment configuration
             umask 077
 
